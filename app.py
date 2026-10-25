@@ -9,7 +9,7 @@ app = Flask(__name__)
 # Número de WhatsApp de la Barbería (México: +52)
 NUMERO_WHATSAPP = "527716265867"
 
-# 1. Configurar e Inicializar la Base de SQLite (con soporte para Barbero)
+# 1. Configurar e Inicializar la Base de SQLite
 def inicializar_bd():
     conexion = sqlite3.connect("flow_fino.db")
     cursor = conexion.cursor()
@@ -23,7 +23,6 @@ def inicializar_bd():
             estado TEXT DEFAULT 'Pendiente'
         )
     """)
-    # Por si la tabla ya existía de antes, agregamos la columna barbero sin borrar datos
     try:
         cursor.execute("ALTER TABLE citas ADD COLUMN barbero TEXT;")
     except sqlite3.OperationalError:
@@ -33,7 +32,7 @@ def inicializar_bd():
 
 inicializar_bd()
 
-# 2. Vista Pública: Formulario con Validación de Horarios y Selección de Barbero
+# 2. Vista Pública: Formulario con selección libre de barbero y validación de cruces
 @app.route("/", methods=["GET", "POST"])
 def cliente_agendar():
     error_msg = None
@@ -48,18 +47,20 @@ def cliente_agendar():
             conexion = sqlite3.connect("flow_fino.db")
             cursor = conexion.cursor()
             
-            # Verificar si el barbero ya tiene una cita a esa misma hora
-            cursor.execute(
-                "SELECT id FROM citas WHERE barbero = ? AND horario = ?",
-                (barbero, horario)
-            )
-            cita_existente = cursor.fetchone()
+            # Si eligió un barbero específico, validamos que no esté ocupado a esa hora
+            if barbero != "Cualquiera disponible":
+                cursor.execute(
+                    "SELECT id FROM citas WHERE barbero = ? AND horario = ?",
+                    (barbero, horario)
+                )
+                cita_existente = cursor.fetchone()
 
-            if cita_existente:
-                error_msg = f"❌ Lo sentimos, el barbero '{barbero}' ya tiene una cita apartada a las '{horario}'. Elige otro horario u otro barbero."
-                conexion.close()
-            else:
-                # Guardar en BD si está libre
+                if cita_existente:
+                    error_msg = f"❌ Lo sentimos, {barbero} ya tiene una cita apartada a las '{horario}'. Elige otro horario o selecciona 'Cualquiera disponible'."
+                    conexion.close()
+            
+            if not error_msg:
+                # Guardar en BD si está libre (o si eligió cualquiera disponible)
                 cursor.execute(
                     "INSERT INTO citas (cliente, servicio, horario, barbero, estado) VALUES (?, ?, ?, ?, 'Pendiente')",
                     (cliente, servicio, horario, barbero)
@@ -92,6 +93,7 @@ def cliente_agendar():
             .btn {{ background: #25d366; color: #fff; border: none; padding: 14px; width: 100%; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; margin-top: 20px; transition: 0.3s; }}
             .btn:hover {{ background: #1eb954; }}
             .alert {{ background: #c0392b; color: white; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-size: 14px; text-align: left; }}
+            .info-barberos {{ font-size: 12px; color: #888; margin-top: 5px; text-align: left; }}
         </style>
     </head>
     <body>
@@ -107,12 +109,13 @@ def cliente_agendar():
 
                 <label for="barbero">Elige a tu Barbero:</label>
                 <select id="barbero" name="barbero">
-                    <option value="Alex">Alex (Especialista en Fade)</option>
-                    <option value="Daniel">Daniel (Barba y Estilo)</option>
-                    <option value="Cualquiera disponible">El primero disponible</option>
+                    <option value="Yahir">Yahir (Todos los días, excepto martes)</option>
+                    <option value="Santi">Santi (Todos los días, excepto lunes y jueves)</option>
+                    <option value="Cualquiera disponible">Cualquiera disponible (El primero libre)</option>
                 </select>
+                <div class="info-barberos">💡 Revisa los días de descanso de cada barbero.</div>
 
-                <label for="servicio">Servicio:</label>
+                <label for="servicio" style="margin-top: 15px;">Servicio:</label>
                 <select id="servicio" name="servicio">
                     <option value="Corte de Cabello">Corte de Cabello</option>
                     <option value="Barba y Perfilado">Barba y Perfilado</option>
@@ -121,7 +124,7 @@ def cliente_agendar():
                 </select>
 
                 <label for="horario">Día y Hora deseada:</label>
-                <input type="text" id="horario" name="horario" placeholder="Ej. Hoy 5:00 PM" required>
+                <input type="text" id="horario" name="horario" placeholder="Ej. Lunes 5:00 PM" required>
 
                 <button type="submit" class="btn">📲 Reservar y Mandar WhatsApp</button>
             </form>
@@ -176,7 +179,7 @@ def panel_tablet():
             <tr>
                 <th>ID</th>
                 <th>Cliente</th>
-                <th>Barbero</th>
+                <th>Barbero Elegido</th>
                 <th>Servicio</th>
                 <th>Horario</th>
                 <th>Estado</th>
@@ -223,7 +226,7 @@ def confirmar_cita(cita_id):
     return redirect(url_for("panel_tablet"))
 
 
-# 5. Exportar a Excel (.csv) incluyendo el Barbero
+# 5. Exportar a Excel (.csv)
 @app.route("/exportar_excel")
 def exportar_excel():
     conexion = sqlite3.connect("flow_fino.db")
