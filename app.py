@@ -18,6 +18,9 @@ def inicializar_bd():
     conexion.commit()
     conexion.close()
 
+# Inicializar la base de datos al arrancar la app (para que funcione en Render)
+inicializar_bd()
+
 # 2. Ruta para el Bot de WhatsApp
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_bot():
@@ -100,5 +103,4 @@ def panel_tablet():
     return render_template_string(html_code, citas=citas)
 
 if __name__ == "__main__":
-    inicializar_bd()
     app.run(port=5000, debug=True)
