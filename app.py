@@ -9,7 +9,7 @@ app = Flask(__name__)
 # Número de WhatsApp de la Barbería (México: +52)
 NUMERO_WHATSAPP = "527716265867"
 
-# 1. Configurar e Inicializar la Base de Datos SQLite
+# 1. Configurar e Inicializar la Base de SQLite (con soporte para Barbero)
 def inicializar_bd():
     conexion = sqlite3.connect("flow_fino.db")
     cursor = conexion.cursor()
@@ -19,42 +19,62 @@ def inicializar_bd():
             cliente TEXT,
             servicio TEXT,
             horario TEXT,
+            barbero TEXT,
             estado TEXT DEFAULT 'Pendiente'
         )
     """)
+    # Por si la tabla ya existía de antes, agregamos la columna barbero sin borrar datos
+    try:
+        cursor.execute("ALTER TABLE citas ADD COLUMN barbero TEXT;")
+    except sqlite3.OperationalError:
+        pass
     conexion.commit()
     conexion.close()
 
-# Se inicializa al arrancar la app en Render
 inicializar_bd()
 
-# 2. Vista Pública: Formulario de Agendado para Clientes
+# 2. Vista Pública: Formulario con Validación de Horarios y Selección de Barbero
 @app.route("/", methods=["GET", "POST"])
 def cliente_agendar():
+    error_msg = None
+
     if request.method == "POST":
         cliente = request.form.get("cliente", "").strip()
         servicio = request.form.get("servicio", "").strip()
         horario = request.form.get("horario", "").strip()
+        barbero = request.form.get("barbero", "").strip()
 
-        if cliente and horario:
-            # Guardar en BD como 'Pendiente'
+        if cliente and horario and barbero:
             conexion = sqlite3.connect("flow_fino.db")
             cursor = conexion.cursor()
+            
+            # Verificar si el barbero ya tiene una cita a esa misma hora
             cursor.execute(
-                "INSERT INTO citas (cliente, servicio, horario, estado) VALUES (?, ?, ?, 'Pendiente')",
-                (cliente, servicio, horario)
+                "SELECT id FROM citas WHERE barbero = ? AND horario = ?",
+                (barbero, horario)
             )
-            conexion.commit()
-            conexion.close()
+            cita_existente = cursor.fetchone()
 
-            # Texto preescrito para WhatsApp
-            mensaje = f"¡Hola! Me gustaría agendar una cita en *Barbería Flow Fino* 💈✂️\n\n👤 *Nombre:* {cliente}\n💈 *Servicio:* {servicio}\n⏰ *Horario:* {horario}"
-            mensaje_encoded = urllib.parse.quote(mensaje)
-            whatsapp_url = f"https://api.whatsapp.com/send?phone={NUMERO_WHATSAPP}&text={mensaje_encoded}"
+            if cita_existente:
+                error_msg = f"❌ Lo sentimos, el barbero '{barbero}' ya tiene una cita apartada a las '{horario}'. Elige otro horario u otro barbero."
+                conexion.close()
+            else:
+                # Guardar en BD si está libre
+                cursor.execute(
+                    "INSERT INTO citas (cliente, servicio, horario, barbero, estado) VALUES (?, ?, ?, ?, 'Pendiente')",
+                    (cliente, servicio, horario, barbero)
+                )
+                conexion.commit()
+                conexion.close()
 
-            return redirect(whatsapp_url)
+                # Redirigir a WhatsApp con el mensaje estructurado
+                mensaje = f"¡Hola! Me gustaría agendar una cita en *Barbería Flow Fino* 💈✂️\n\n👤 *Nombre:* {cliente}\n💈 *Servicio:* {servicio}\n👨‍🎤 *Barbero:* {barbero}\n⏰ *Horario:* {horario}"
+                mensaje_encoded = urllib.parse.quote(mensaje)
+                whatsapp_url = f"https://api.whatsapp.com/send?phone={NUMERO_WHATSAPP}&text={mensaje_encoded}"
 
-    html_cliente = """
+                return redirect(whatsapp_url)
+
+    html_cliente = f"""
     <!DOCTYPE html>
     <html lang="es">
     <head>
@@ -62,24 +82,35 @@ def cliente_agendar():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Barbería Flow Fino - Agendar Cita</title>
         <style>
-            body { background-color: #121212; color: #f5f5f5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; padding: 20px; margin: 0; }
-            .card { background: #1e1e1e; max-width: 420px; margin: 40px auto; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(243, 156, 18, 0.2); border: 1px solid #333; }
-            h1 { color: #f39c12; margin-bottom: 5px; font-size: 26px; }
-            p { color: #aaa; margin-bottom: 25px; font-size: 14px; }
-            label { display: block; text-align: left; margin: 10px 0 5px; font-weight: bold; color: #ddd; }
-            input, select { width: 100%; padding: 12px; border-radius: 6px; border: 1px solid #444; background: #2a2a2a; color: #fff; box-sizing: border-box; font-size: 15px; }
-            input:focus, select:focus { border-color: #f39c12; outline: none; }
-            .btn { background: #25d366; color: #fff; border: none; padding: 14px; width: 100%; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; margin-top: 20px; transition: 0.3s; }
-            .btn:hover { background: #1eb954; }
+            body {{ background-color: #121212; color: #f5f5f5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; padding: 20px; margin: 0; }}
+            .card {{ background: #1e1e1e; max-width: 420px; margin: 40px auto; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(243, 156, 18, 0.2); border: 1px solid #333; }}
+            h1 {{ color: #f39c12; margin-bottom: 5px; font-size: 26px; }}
+            p {{ color: #aaa; margin-bottom: 25px; font-size: 14px; }}
+            label {{ display: block; text-align: left; margin: 10px 0 5px; font-weight: bold; color: #ddd; }}
+            input, select {{ width: 100%; padding: 12px; border-radius: 6px; border: 1px solid #444; background: #2a2a2a; color: #fff; box-sizing: border-box; font-size: 15px; }}
+            input:focus, select:focus {{ border-color: #f39c12; outline: none; }}
+            .btn {{ background: #25d366; color: #fff; border: none; padding: 14px; width: 100%; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; margin-top: 20px; transition: 0.3s; }}
+            .btn:hover {{ background: #1eb954; }}
+            .alert {{ background: #c0392b; color: white; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-size: 14px; text-align: left; }}
         </style>
     </head>
     <body>
         <div class="card">
             <h1>💈 Flow Fino 💈</h1>
             <p>Reserva tu cita al instante</p>
+            
+            {"<div class='alert'>" + error_msg + "</div>" if error_msg else ""}
+
             <form method="POST">
                 <label for="cliente">Tu Nombre:</label>
                 <input type="text" id="cliente" name="cliente" placeholder="Ej. Carlos Pérez" required>
+
+                <label for="barbero">Elige a tu Barbero:</label>
+                <select id="barbero" name="barbero">
+                    <option value="Alex">Alex (Especialista en Fade)</option>
+                    <option value="Daniel">Daniel (Barba y Estilo)</option>
+                    <option value="Cualquiera disponible">El primero disponible</option>
+                </select>
 
                 <label for="servicio">Servicio:</label>
                 <select id="servicio" name="servicio">
@@ -101,12 +132,12 @@ def cliente_agendar():
     return render_template_string(html_cliente)
 
 
-# 3. Vista de Administración para la Tablet: `/admin`
+# 3. Vista de Administración en la Tablet (`/admin`)
 @app.route("/admin")
 def panel_tablet():
     conexion = sqlite3.connect("flow_fino.db")
     cursor = conexion.cursor()
-    cursor.execute("SELECT id, cliente, servicio, horario, estado FROM citas ORDER BY id DESC")
+    cursor.execute("SELECT id, cliente, servicio, horario, barbero, estado FROM citas ORDER BY id DESC")
     citas = cursor.fetchall()
     conexion.close()
 
@@ -121,7 +152,7 @@ def panel_tablet():
             body { background-color: #121212; color: #e0e0e0; font-family: Arial, sans-serif; text-align: center; padding: 20px; }
             h1 { color: #f39c12; margin-bottom: 5px; }
             .header-btns { margin: 20px 0; display: flex; justify-content: center; gap: 15px; }
-            table { width: 100%; max-width: 800px; margin: 0 auto; border-collapse: collapse; background: #1e1e1e; border-radius: 8px; overflow: hidden; }
+            table { width: 100%; max-width: 900px; margin: 0 auto; border-collapse: collapse; background: #1e1e1e; border-radius: 8px; overflow: hidden; }
             th, td { padding: 12px; border: 1px solid #333; text-align: center; }
             th { background-color: #2c2c2c; color: #f39c12; }
             .btn-action { padding: 6px 12px; border-radius: 4px; text-decoration: none; font-weight: bold; color: #fff; font-size: 13px; }
@@ -145,6 +176,7 @@ def panel_tablet():
             <tr>
                 <th>ID</th>
                 <th>Cliente</th>
+                <th>Barbero</th>
                 <th>Servicio</th>
                 <th>Horario</th>
                 <th>Estado</th>
@@ -154,17 +186,18 @@ def panel_tablet():
             <tr>
                 <td>{{ cita[0] }}</td>
                 <td>{{ cita[1] }}</td>
+                <td><b>{{ cita[4] }}</b></td>
                 <td>{{ cita[2] }}</td>
                 <td>{{ cita[3] }}</td>
                 <td>
-                    {% if cita[4] == 'Pendiente' %}
+                    {% if cita[5] == 'Pendiente' %}
                         <span class="badge-pendiente">⏳ Pendiente</span>
                     {% else %}
                         <span class="badge-confirmada">✅ Confirmada</span>
                     {% endif %}
                 </td>
                 <td>
-                    {% if cita[4] == 'Pendiente' %}
+                    {% if cita[5] == 'Pendiente' %}
                         <a class="btn-action btn-confirm" href="/confirmar/{{ cita[0] }}">Confirmar</a>
                     {% else %}
                         -
@@ -190,18 +223,18 @@ def confirmar_cita(cita_id):
     return redirect(url_for("panel_tablet"))
 
 
-# 5. Exportar la Tabla a Excel (.csv)
+# 5. Exportar a Excel (.csv) incluyendo el Barbero
 @app.route("/exportar_excel")
 def exportar_excel():
     conexion = sqlite3.connect("flow_fino.db")
     cursor = conexion.cursor()
-    cursor.execute("SELECT id, cliente, servicio, horario, estado FROM citas")
+    cursor.execute("SELECT id, cliente, barbero, servicio, horario, estado FROM citas")
     citas = cursor.fetchall()
     conexion.close()
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["ID", "Cliente", "Servicio", "Horario", "Estado"])
+    writer.writerow(["ID", "Cliente", "Barbero", "Servicio", "Horario", "Estado"])
 
     for row in citas:
         writer.writerow(row)
